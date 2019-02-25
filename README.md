@@ -318,3 +318,363 @@ Será usado pois **Object.defineProperty** altera o objeto passado
 // target = source data
 var p = new Proxy(target, handler);
 ```
+
+## Reatividade no código do Vue.js
+
+```html
+<!-- index.html -->
+<div id="app">
+  <h1>{{ product }}</h1>
+</div>
+
+<script src="vue.js"></script>
+
+<script>
+  var app = new Vue({
+    el: "#app",
+    data: {
+      product: "Socks"
+    }
+  });
+</script>
+```
+
+Onde no código fonte o product ganha sua reatividade?
+
+```js
+// /src/core/instance/index.js
+import { initMixin } from "./init";  // Vamos entrar aqui
+import { stateMixin } from "./state";
+import { renderMixin } from "./render";
+import { eventsMixin } from "./events";
+import { lifecycleMixin } from "./lifecycle";
+import { warn } from "../util/index";
+
+function Vue (options) {
+  ... // omitted code
+  this._init(options)
+}
+```
+
+```js
+// /src/core/instance/init.js
+export function initMixin (Vue : Class<Component>) {
+  Vue.prototype._init = function (options?: Object) {
+    const vm: Component = this
+
+    ... Normalizing options ...
+    vm._self = vm
+    initLifecycle(vm)
+    initEvents(vm)
+    initRender(vm)
+    callHooks(vm, 'beforeCreate')
+    initInjections(vm)
+    initState(vm) // Vamos entrar aqui
+    initProvide(vm)
+    callHook(vm, 'created')
+    ...
+    vm.$mount(vm.$options.el)
+  }
+}
+```
+
+```js
+// /src/core/instance/state.js
+export function initState(vm: Component) {
+  vm._watchers = [];
+  const opts = vm.$options;
+  if (opts.props) initProps(vm, opts.props);
+  if (opts.methods) initMethods(vm, opts.methods);
+  if (opts.data) {
+    initData(vm); // Vamos entrar aqui
+  } else {
+    observe((vm._data = {}), true /* asRootData */);
+  }
+  if (opts.computed) initComputed(vm, opts.computed);
+  if (opts.watch && opts.watch !== nativeWatch) {
+    initWatch(vm, opts.watch);
+  }
+}
+```
+
+```js
+// /src/core/instance/state.js
+function initData (vm: Component) {
+  // data = { product: 'Socks' }
+  let data = vm.$options.data
+  ...
+  observe(data, true /* asRootData */) // Vamos entrar aqui
+}
+```
+
+```js
+// /src/core/observer/index.js
+export function observe (value: any, asRootData: ?boolean): Observer | void {
+  ...
+  ob = new Observer(value) // { product: 'Socks' }
+  return ob
+}
+```
+
+```js
+// /src/core/observer/index.js
+export class Observer {
+  value: any
+
+  constructor(value: any)  {
+    this.value = value
+    ...
+    if (Array.isArray(value)) {
+      ...
+      this.observerArray(value)
+      /*
+        Método passa por cada item do array
+        observeArray(items: Array<any>) {
+          for (let i = 0, l = items.length; i < l; i++ {
+            observe(items[i])
+          })
+        }
+      */
+    } else {
+      this.walk(value)
+      /*
+        walk(obj: Object) {
+          const key = Object.keys(obj) // [ 'product' ]
+
+          for (let i = 0; i < keys.length; i++) {
+            defineReactive(obj, keys[i], obj[keys[i]])
+          }
+        }
+      */
+    }
+  }
+}
+```
+
+```js
+// /src/core/observer/index.js
+export function defineReactive(
+  obj: Object, // { product: 'Socks' }
+  key: string, // 'product'
+  val: any, // 'Socks' (val é nosso internalValue)
+  customSetter?: ?Function,
+  shallow?: boolean
+) {
+  const dep = new Dep();
+
+  const property = Object.getOwnPropertyDescriptor(obj, key);
+  // Se a propriedade não for configurável, então retorne
+  if (property && property.configurable === false) {
+    return;
+  }
+  // cater for pre-defined getters/setters
+  const getter = property && property.get;
+  const setter = property && property.set;
+
+  // Aqui é onde nós ciramos os getters e setters
+  Object.defineProperty(obj, key {
+    enumerable: true,
+    configurable: true,
+    // Nossa função get para essa propriedade
+    get: function reactiveGetter () {
+      const value = getter ? getter.call(obj) : val
+
+      if (Dep.target) {
+        dep.depend()
+        ...
+      }
+      return value // Getter retorna o valor
+    },
+    // Nossa função set para essa propriedade
+    set: function reactiveSetter (newVal) {
+      // Pega valor através de um getter customizado ou valor
+      const value = getter ? getter.call(obj) : val
+
+      // Se o newVal for o mesmo valor então retorna
+      if (newVal === value || (newVal !== newVal && value !== value)) {
+        return
+      }
+
+      // Chama o setter custom, se não seta o novo valor
+      if (setter) {
+        setter.call(obj, newVal)
+      } else {
+        val = newVal
+      }
+
+      dep.notify()
+    } ...
+  })
+}
+```
+
+Lembra da nossa Watch function?
+
+```js
+function watcher(myFunc) {
+  target = myFunc;
+  target();
+  target = null;
+}
+
+watcher(() => {
+  total = price * quantity;
+});
+```
+
+Vue tem uma Watcher class na qual:
+
+- Recebe como parâmetro o código para observar (igual o nosso)
+- Armazena o código dentro de uma propriedade **getter**
+- Tem uma function **get** (chamada diretamente na instanciação, ou pelo scheduler) o qual:
+  - Roda **pushTarget(this)** para setar **Dep.target** para este objeto Watcher
+  - Chama **this.getter.call** para rodar o código
+  - Roda **popTarget()** para remover o atual **Dep.target**
+- Tem uma função **update** para enfileirar este **watcher** para rodar (usando um scheduler)
+
+```js
+// /src/code/observer/watcher.js
+export default class Watcher {
+  ...
+  // Chamado pelo construtor
+  get() {
+    pushTarget(this)
+    ...
+    value = this.getter.call(vm, vm)
+    ...
+    popTarget()
+    return value
+  }
+
+  // Chamado pela classe Dep notify()
+  update() {
+    if (this.lazy) {
+      this.dirty = true
+    } else if (this.sync) {
+      this.run()
+      /*
+        // Checa para ver se tiver ativo, se tiver
+        // ele roda o this
+        run() {
+          if (this.active) {
+            const value = this.get() // get de cima
+            // ...
+          }
+        }
+      */
+    } else {
+      // Quando está pronto tambem chama run()
+      queueWatcher(this)
+    }
+  }
+
+  addDep(dep: Dep) {
+    ...
+    // Watcher tambem mantem a localização dos deps
+    this.newDeps.push(dep)
+    dep.addSub(this) // da Classe Dep
+  }
+}
+```
+
+```js
+// /src/core/observer/dep.js
+export default class Dep {
+  ...
+  subs: Array<Watcher>
+  // Nosso subscribers são todos da classe Watcher
+  constructor() {
+    this.subs = []
+  }
+
+  addSub(sub: Watcher) {
+    this.subs.push(sub)
+  }
+
+  depend() {
+    // Se tiver target, adiciona essa dependencia
+    if (Dep.target) {
+      Dep.target.addDep(this) // da Classe Watcher
+    }
+  }
+
+  notify() {
+    const subs = this.subs.slice9)
+    for (let i = 0, l = subs.length; i < l; i++) {
+      subs[i].update()
+    }
+  }
+}
+```
+
+## Resalvas sobre a Reactividade
+
+### Array Change Detection
+
+Se você usa algum destes metodos de array abaixo não se preocupe, o Vue encapsula os métodos de mutação do array observados, de modo que todos esses acionam atualizações
+
+```js
+push();
+pop();
+shift();
+unshift();
+splice();
+sort();
+reverse();
+```
+
+Porem o Vue não pode detectar a seguintes mudanças
+
+```js
+app.items[indexOfItem] = newValue;
+// A Solução seria:
+Vue.set(app.items, indexOfItem, newValue);
+```
+
+```js
+app.items.length = newLength;
+// A Solução seria:
+app.items.splice(indexOfItem, 1, newValue);
+```
+
+### Object Change Detection
+
+Vue não pode detectar adição e remoção de propriedades
+
+```js
+var app = new Vue({
+  el: "#app",
+  data: {
+    product: "Socks"
+  }
+});
+
+app.color = "red";
+```
+
+Não é possível adicionar propriedades reativas no nivel root
+
+A solução seria:
+
+```js
+// 1 - Nest your objects
+var app = new Vue({
+  el: "#app",
+  data: {
+    product: {
+      name: "Socks"
+    }
+  }
+});
+// 2 - Usar 'set'
+Vue.set(app.product, "color", "red");
+```
+
+Para multiplas propriedades pode-se utilizar:
+
+```js
+app.product = Object.assign({}, app.product, {
+  color: "red",
+  price: 20
+});
+```
