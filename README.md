@@ -307,3 +307,14 @@ Quando é alterado o valor (**set**), é chamado **dep.notify()**, onde executa 
 ### Watcher
 
 Recebe uma função que utiliza o data, adicionando temporáriamente essa função em uma variavel que é chamada para registrar nos deps das propriedades utilizadas.
+
+## Proxies
+
+Na versão **Vue 2.x-next**, a **Reatividade do Vue será reescrita com Proxies**
+
+Será usado pois **Object.defineProperty** altera o objeto passado
+
+```js
+// target = source data
+var p = new Proxy(target, handler);
+```
