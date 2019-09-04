@@ -678,3 +678,166 @@ app.product = Object.assign({}, app.product, {
   price: 20
 });
 ```
+
+## Template Compilation
+
+Component Template Rendering tem dois passos, e acontece depois da reatividade inicializar.
+
+Passo 1 - Compilação
+
+Compila nosso template para a função render
+
+Passo 2 - Roda a função Render
+
+Cria um VNode, ou seja, um Virtual DOM Node e é o que é renderizado no navegador.
+
+### Quando você utiliza o Vue CLI v2.x
+
+É nos perguntado qual Vue buidl você quer utilizar, **Runtime + Compiler** ou **Runtime-only**
+
+O que isto realmente está perguntando é:
+
+Para o que é enviado para o navegador, você deseja incluir o código que é capaz de compilar modelos?
+Se sim, nós usamos a opção **Runtime + Compiler**, que fica + ~32kb min + gzip a aplicação
+Se não fica ~22kb min + gzip
+
+Se utilizar sem Compiler significa que eu preciso colocar todos os meus templates em arquivos .vue, os quais irão ser compilados dentro da função render em tempo de compilação
+
+OBS: **Vue CLI 3.0 é Runtime-only por default**
+OBS2: Compilação pode acontecer **tanto no server como no client side**
+OBS3: Roda a função render é **somente no client side**
+
+### O que é o Virtual DOM
+
+Um modo de representar o DOM atual com objetos javascript.
+
+```html
+<div>Hello</div>
+```
+
+```js
+// Como VNode (Virtual Node) ficaria assim
+{
+  tag: 'div',
+  children: [
+    {
+      text: 'Hello'
+    }
+  ]
+}
+```
+
+Vue sabe transformar VNodes em elementos do DOM, sabendo otimizar quando valores são atualizados, alterando somente o que foi alterado eficientemente.
+
+O passo a passo para criação do DOM seria o seguinte:
+
+```text
+1 - Template
+2 - Render Function
+3 - VNode
+4 - Browser
+```
+
+```html
+<!-- 1 - Template -->
+<div id="app"></div>
+
+<script src="vue.js"></script>
+<script>
+  var app = new Vue({
+    el: "#app",
+    template: "<div>hello</div>"
+  });
+</script>
+```
+
+```js
+// 2 - Render Function (simplificado)
+app.$options.render = createElement => {
+  return createElement("div", "hello");
+};
+```
+
+```js
+// 3 - VNode
+{
+  tag: 'div',
+  children: [
+    {
+      text: 'Hello'
+    }
+  ]
+}
+```
+
+### Como nós podemos criar nossa própria função de render
+
+Para que possamos pular a etapa de **Template compilation (Etapa 1)**?
+
+```html
+<!-- 2 - Render Function (simplificado) -->
+<!-- render retornar um VNode -->
+<div id="app"></div>
+
+<script src="vue.js"></script>
+<script>
+  var app = new Vue({
+    el: "#app",
+    render(createElement) {
+      return createElement('div', 'hello)
+    }
+  });
+</script>
+```
+
+Quando escrevemos render functions, ao inves de escrever createElement, eles utilizam o nome **'h'** como alias, que significa **Hyperscript** (Hyper Text Markup Language + Javascript)
+
+```html
+<div id="app"></div>
+
+<script src="vue.js"></script>
+<script>
+  var app = new Vue({
+    el: "#app",
+    render(h) {
+      return h('div', 'hello)
+    }
+  });
+</script>
+```
+
+### Quando este VNode é inserido no DOM
+
+Passos para inicializar um Componente e Inserir o VNode
+
+- Inicializar Eventos e Lifecycles
+- Inicializar injections e Reactividade (AKA State) **(beforeCreate)**
+- Se um Template existir, compilar para uma função de render **(created)**
+- Começar a montar (Criar VNode e inserir no DOM) **(beforeMount)**
+- E depois de montado, obteremos o componente no browser **(mounted)**
+
+### O que acontece dentro do lifecycle mount
+
+Montando com reatividade e renderizando
+Na aula 1 nós assistimos este código para propriedades reativas:
+
+```js
+watcher(() => {
+  total = data.price * data.quantity;
+});
+```
+
+No código do Vue no lifecycle.js nos encontramos:
+
+```js
+export function mountComponent(...) {
+  ...
+  callHook(vm, 'beforeMount')
+
+  // Basicamente vai ser nosso target
+  let updateComponent = () => {
+    vm._update(vm._render(), hydrating)
+  }
+  new Watcher(vm, updateComponent, noop, null, true)
+}
+```
